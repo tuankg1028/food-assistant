@@ -28,7 +28,7 @@ except Exception as e:
 
 # Allowed domains for search
 ALLOWED_DOMAINS = [
-    "https://cooponline.vn",
+    "https://kingfoodmart.com",
     "https://bachhoaxanh.com",
     "https://winmart.vn"
 ]
@@ -79,7 +79,7 @@ def search_web(query):
                     # query=enhanced_query + f" site:{domain}",
                     query=enhanced_query + f" site:{domain}",
                     search_depth="advanced",
-                    max_results=5
+                    max_results=3
                 )
                 
                 # Add domain results if they don't already exist in all_results
@@ -108,7 +108,7 @@ def get_gpt4o_response(user_query, search_results):
         ])
         
         # Track which retailers have data
-        has_cooponline = any("cooponline.vn" in result.get('url', '') for result in search_results.get("results", []))
+        has_kingfoodmart = any("kingfoodmart.com" in result.get('url', '') for result in search_results.get("results", []))
         has_bachhoaxanh = any("bachhoaxanh.com" in result.get('url', '') for result in search_results.get("results", []))
         has_winmart = any("winmart.vn" in result.get('url', '') for result in search_results.get("results", []))
         
@@ -120,31 +120,33 @@ Always provide detailed information about products, including:
 3. Brand information when available
 4. Promotions or special offers
 5. Availability status
+6. Direct purchase links to the products
 
 When comparing products, include price differences and value comparisons.
 If the information isn't available in the search results, admit that you don't know.
 Only provide information available from these retailers' websites.
+Include direct links to purchase the products with proper markdown formatting [Product Name](URL).
 Respond in the same language as the user's query.
 
 IMPORTANT: At the beginning of your response, clearly mention which retailers have data for this query:
-- Mention "Coop Online" if there's data from cooponline.vn
+- Mention "Kingfoodmart" if there's data from kingfoodmart.com
 - Mention "Bách Hóa Xanh" if there's data from bachhoaxanh.com
 - Mention "Winmart" if there's data from winmart.vn
 """
 
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Search results:\n{context}\n\nUser question: {user_query}\n\nRetailers with data: {'Coop Online' if has_cooponline else ''}{', Bách Hóa Xanh' if has_bachhoaxanh else ''}{', Winmart' if has_winmart else ''}"}
+            {"role": "user", "content": f"Search results:\n{context}\n\nUser question: {user_query}\n\nRetailers with data: {'Kingfoodmart' if has_kingfoodmart else ''}{', Bách Hóa Xanh' if has_bachhoaxanh else ''}{', Winmart' if has_winmart else ''}"}
         ]
         
-        response = openai_client.chat.completions.create(
+        # Return the streaming response directly
+        return openai_client.chat.completions.create(
             model="gpt-4o",
             messages=messages,
             temperature=0.7,
             max_tokens=800,
+            stream=True,
         )
-        
-        return response.choices[0].message.content
     
     except Exception as e:
         st.error(f"Error getting GPT-4o response: {e}")
@@ -154,7 +156,7 @@ IMPORTANT: At the beginning of your response, clearly mention which retailers ha
 st.title("🍔 Food Shopping Assistant")
 st.markdown("""
 Ask questions about products from these Vietnamese retailers:
-- Coop Online
+- Kingfoodmart
 - Bách Hóa Xanh
 - Winmart
 """)
@@ -182,13 +184,22 @@ if prompt := st.chat_input("Ask about food products..."):
         with st.spinner("Searching for information..."):
             # Search web for information
             search_results = search_web(prompt)
-            print(search_results)
 
-            # Get GPT-4o response
-            response = get_gpt4o_response(prompt, search_results)
+            # Get GPT-4o streaming response
+            response_stream = get_gpt4o_response(prompt, search_results)
             
-            # Display response
-            st.markdown(response)
+            # Process the streaming response
+            response_container = st.empty()
+            full_response = ""
+            
+            # Display the response as it streams in
+            for chunk in response_stream:
+                if chunk.choices[0].delta.content is not None:
+                    full_response += chunk.choices[0].delta.content
+                    response_container.markdown(full_response + "▌")
+            
+            # Update with the final response (without cursor)
+            response_container.markdown(full_response)
             
             # Optionally show search sources (collapsible)
             with st.expander("View Sources"):
@@ -196,7 +207,7 @@ if prompt := st.chat_input("Ask about food products..."):
                     st.markdown(f"**Source {i+1}:** [{result.get('title')}]({result.get('url')})")
     
     # Add assistant response to chat history
-    st.session_state.messages.append({"role": "assistant", "content": response})
+    st.session_state.messages.append({"role": "assistant", "content": full_response})
 
 # Add sidebar with info
 with st.sidebar:
