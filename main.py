@@ -34,10 +34,27 @@ ALLOWED_DOMAINS = [
 ]
 
 def generate_enhanced_query(user_query):
-    """Use GPT to generate a more effective search query based on the user's question."""
+    """Use GPT to generate a more effective search query based on the user's question and conversation history."""
     try:
         if not openai_client:
             return user_query
+            
+        # Extract previous user questions from chat history (up to 3 most recent)
+        previous_queries = []
+        if "messages" in st.session_state:
+            for msg in reversed(st.session_state.messages):
+                if msg["role"] == "user" and msg["content"] != user_query:
+                    previous_queries.append(msg["content"])
+                    if len(previous_queries) >= 3:
+                        break
+            
+        # Reverse to get chronological order
+        previous_queries.reverse()
+        
+        # Create context from previous queries if they exist
+        context = ""
+        if previous_queries:
+            context = "Previous questions:\n" + "\n".join([f"- {q}" for q in previous_queries]) + "\n\n"
             
         system_prompt = """You are a search query optimizer for food shopping in Vietnam.
 Your task is to convert user questions into effective search queries that will yield optimal results from Vietnamese grocery websites.
@@ -46,7 +63,7 @@ Return ONLY the optimized search query without any explanations or additional te
 
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Convert this question into an effective search query: {user_query}"}
+            {"role": "user", "content": f"{context}Current question: {user_query}\n\nGenerate an optimized search query combining relevant context from previous questions with the current question:"}
         ]
         
         response = openai_client.chat.completions.create(
@@ -136,8 +153,20 @@ IMPORTANT: At the beginning of your response, clearly mention which retailers ha
 
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Search results:\n{context}\n\nUser question: {user_query}\n\nRetailers with data: {'Kingfoodmart' if has_kingfoodmart else ''}{', Bách Hóa Xanh' if has_bachhoaxanh else ''}{', Winmart' if has_winmart else ''}"}
         ]
+        
+        # Add conversation history (previous messages)
+        if "messages" in st.session_state:
+            # Only include the last 4 message pairs to avoid context length issues
+            history_messages = st.session_state.messages[-8:] if len(st.session_state.messages) > 8 else st.session_state.messages
+            for msg in history_messages:
+                # Skip the current user message as it will be added separately
+                if msg["role"] == "user" and msg["content"] == user_query:
+                    continue
+                messages.append({"role": msg["role"], "content": msg["content"]})
+        
+        # Add current search context and user query
+        messages.append({"role": "user", "content": f"Search results:\n{context}\n\nUser question: {user_query}\n\nRetailers with data: {'Kingfoodmart' if has_kingfoodmart else ''}{', Bách Hóa Xanh' if has_bachhoaxanh else ''}{', Winmart' if has_winmart else ''}"})
         
         # Return the streaming response directly
         return openai_client.chat.completions.create(
